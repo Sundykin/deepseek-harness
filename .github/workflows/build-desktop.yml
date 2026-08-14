@@ -1,0 +1,155 @@
+name: Build desktop installers
+
+# Installer builds for the desktop app; see
+# .agents/notes/implemented/architecture/2026-08-14-desktop-app-over-loopback-http.md.
+# Each installer carries a staged harness deployment built on its own platform,
+# because that closure includes native addons, so the build must run on a runner
+# matching the target rather than cross-compiling. Run manually, label a PR
+# `build-desktop` (remove and reapply to rerun), or call it from a release
+# workflow. Checkout uses the triggering ref, so dispatch needs no ref input.
+on:
+  workflow_call:
+    inputs:
+      targets:
+        description: Comma-separated targets to build; empty builds all of them.
+        type: string
+        required: false
+        default: ''
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: >-
+          Comma-separated targets to build. Any subset of:
+          macos-arm64, macos-x64, windows-x64. Empty builds all three.
+        type: string
+        required: false
+        default: ''
+  pull_request:
+    types: [labeled]
+
+concurrency:
+  # Distinct from any caller's group, so an ordinary run cannot cancel a release
+  # validation on the same ref.
+  group: build-desktop-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # CI runs must never report to the production telemetry endpoint baked into
+  # apps/cli/cordis.yml (AppCLIEntry disables the row when set).
+  DSH_TELEMETRY_DISABLED: '1'
+  PRIMARY_NODE_VERSION: '24'
+
+jobs:
+  # Job-level conditions cannot inspect `matrix`, so target names are validated
+  # and the matrix constructed before the build job.
+  plan:
+    name: plan targets
+    if: >-
+      github.event_name != 'pull_request'
+      || github.event.label.name == 'build-desktop'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          TARGETS: ${{ inputs.targets }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          all='[
+            {"target":"macos-arm64","runner":"macos-15","platform":"--mac","arch":"--arm64"},
+            {"target":"macos-x64","runner":"macos-15","platform":"--mac","arch":"--x64"},
+            {"target":"windows-x64","runner":"windows-2025","platform":"--win","arch":"--x64"}
+          ]'
+          if [ -z "${TARGETS:-}" ]; then
+            echo "matrix=$(jq -c . <<< "$all")" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          selected="$(tr ',' '\n' <<< "$TARGETS" | sed 's/[[:space:]]//g; /^$/d' | jq -Rsc 'split("\n") | map(select(. != ""))')"
+          unknown="$(jq -r --argjson all "$all" '[.[] | select(. as $t | $all | map(.target) | index($t) | not)] | join(", ")' <<< "$selected")"
+          if [ -n "$unknown" ]; then
+            echo "::error::Unknown desktop target(s): $unknown"
+            exit 1
+          fi
+          echo "matrix=$(jq -c --argjson sel "$selected" '[.[] | select(.target as $t | $sel | index($t))]' <<< "$all")" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: plan
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      # setup-node's built-in pnpm store cache keys on platform and arch, so
+      # each target keeps its own cache.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.PRIMARY_NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      # The launcher bin and the frontend dist are staging inputs, never built
+      # as a side effect of packaging.
+      - name: Build workspace artifacts
+        run: pnpm run build
+
+      - name: Stage the harness deployment
+        run: pnpm run desktop:stage
+
+      # electron-builder is unsigned here: signing credentials belong to the
+      # release workflow, and an unsigned installer is still the artifact this
+      # job exists to prove buildable.
+      - name: Build installer
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm --filter @deepseek-ai/dsh-desktop exec electron-builder --config electron-builder.yml ${{ matrix.platform }} ${{ matrix.arch }} --publish never
+
+      # A resource-copy filter can silently drop the whole staged deployment and
+      # still produce an installer that installs and launches, so the packaged
+      # layout is checked before the artifact is published.
+      - name: Verify the packaged app
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${{ runner.os }}" in
+            macOS) app="$(find apps/desktop/release -maxdepth 2 -name '*.app' -type d | head -1)" ;;
+            *) app="$(find apps/desktop/release -maxdepth 1 -type d -name 'win-*unpacked' -o -maxdepth 1 -type d -name 'linux-*unpacked' | head -1)" ;;
+          esac
+          if [ -z "$app" ]; then
+            echo "::error::no packaged app directory under apps/desktop/release"
+            exit 1
+          fi
+          pnpm run verify-desktop-package "$app"
+
+      - name: Collect installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-desktop
+          # Installer artifacts only: the unpacked app directory and the
+          # builder's own metadata are build intermediates.
+          find apps/desktop/release -maxdepth 1 -type f \
+            \( -name '*.dmg' -o -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) \
+            -exec cp {} dist-desktop/ \;
+          ls -lh dist-desktop
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dsh-desktop-${{ matrix.target }}
+          path: dist-desktop/*
+          if-no-files-found: error
+          retention-days: 7

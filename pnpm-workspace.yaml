@@ -30,6 +30,11 @@ linkWorkspacePackages: true
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # app-builder-lib 26.15.3 calls ElectronDownloadCacheMode, which @electron/get
+  # only added in 3.1.0, while declaring the looser range ^3.0.0 — so a resolution
+  # to 3.0.0 fails the packaging run. Pinned to the parent alone: Electron's own
+  # dependency is ^5, and 4+ are ESM-only, which this CJS caller cannot require.
+  'app-builder-lib>@electron/get': '^3.1.0'
 
 peerDependencyRules:
   allowedVersions:

@@ -12,11 +12,11 @@
  * @module @deepseek-ai/dsh-desktop/harness
  */
 
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 
 /** Bind host of the harness server; the shell never loads a non-loopback origin. */
-export const LOOPBACK_HOST = '127.0.0.1'
+const LOOPBACK_HOST = '127.0.0.1'
 
 /** Port argument requesting an OS-assigned free port, so concurrent launches never collide. */
 const OS_ASSIGNED_PORT = '0'
@@ -211,6 +211,3 @@ export async function startHarness(options: StartHarnessOptions): Promise<Runnin
     },
   }
 }
-
-/** Re-exported for the supervising shell to reuse the same child type. */
-export type { ChildProcess }

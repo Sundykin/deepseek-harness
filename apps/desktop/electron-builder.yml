@@ -15,9 +15,17 @@ files:
   - static/**/*
   - package.json
 
+# The staged deployment is copied as two entries because the packager treats a
+# `node_modules` directory inside a copied tree as its own dependency graph and
+# skips it, which would leave a resource tree holding one manifest. Naming it as
+# a source in its own right copies it verbatim.
 extraResources:
   - from: build/harness
     to: harness
+    filter: ['**/*', '!node_modules']
+  - from: build/harness/node_modules
+    to: harness/node_modules
+    filter: ['**/*']
 
 asar: true
 

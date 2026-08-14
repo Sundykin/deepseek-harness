@@ -8,7 +8,10 @@ describe('resolveHarnessEntry', () => {
       packaged: true,
       resourcesPath: join('/Applications', 'DeepSeek Harness.app', 'Contents', 'Resources'),
       appPath: join('/Applications', 'DeepSeek Harness.app', 'Contents', 'Resources', 'app.asar'),
-    })).toBe(join('/Applications', 'DeepSeek Harness.app', 'Contents', 'Resources', 'harness', 'lib', 'bin.js'))
+    })).toBe(join(
+      '/Applications', 'DeepSeek Harness.app', 'Contents', 'Resources',
+      'harness', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js',
+    ))
   })
 
   it('reads the sibling CLI package when running from the workspace', () => {
@@ -31,7 +34,7 @@ describe('resolveHarnessEntry', () => {
   it('ignores an empty override rather than spawning the app path', () => {
     expect(resolveHarnessEntry({
       packaged: true, resourcesPath: '/res', appPath: '/app', entryOverride: '',
-    })).toBe(join('/res', 'harness', 'lib', 'bin.js'))
+    })).toBe(join('/res', 'harness', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js'))
   })
 })
 

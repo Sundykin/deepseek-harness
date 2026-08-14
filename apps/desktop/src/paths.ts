@@ -14,10 +14,17 @@
 import { join } from 'node:path'
 
 /** Directory under `resources/` holding the staged harness deployment in a packaged app. */
-export const STAGED_HARNESS_DIR = 'harness'
+const STAGED_HARNESS_DIR = 'harness'
 
-/** Path of the launcher inside a harness package root, in both layouts. */
+/** Path of the launcher inside the `@deepseek-ai/dsh` package, in both layouts. */
 const LAUNCHER_RELATIVE_PATH = join('lib', 'bin.js')
+
+/**
+ * Path of the launcher inside the staged deployment. The staged tree's root is
+ * the deploy-root manifest, not the app package, so the launcher sits where any
+ * dependency would: under `node_modules`.
+ */
+const STAGED_LAUNCHER_PATH = join('node_modules', '@deepseek-ai', 'dsh', LAUNCHER_RELATIVE_PATH)
 
 /** Environment variable pinning the launcher explicitly, for running the shell against another checkout. */
 export const HARNESS_ENTRY_ENV = 'DSH_DESKTOP_HARNESS_ENTRY'
@@ -41,7 +48,7 @@ export interface HarnessEntryFacts {
  */
 export function resolveHarnessEntry(facts: HarnessEntryFacts): string {
   if (facts.entryOverride !== undefined && facts.entryOverride !== '') return facts.entryOverride
-  if (facts.packaged) return join(facts.resourcesPath, STAGED_HARNESS_DIR, LAUNCHER_RELATIVE_PATH)
+  if (facts.packaged) return join(facts.resourcesPath, STAGED_HARNESS_DIR, STAGED_LAUNCHER_PATH)
   // Development: apps/desktop and apps/cli are siblings in the workspace.
   return join(facts.appPath, '..', 'cli', LAUNCHER_RELATIVE_PATH)
 }

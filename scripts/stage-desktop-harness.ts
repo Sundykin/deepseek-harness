@@ -18,7 +18,7 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { cp, readdir, realpath, rm } from 'node:fs/promises'
+import { cp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { join, relative, resolve, sep } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -35,6 +35,9 @@ const STAGED_LAUNCHER = 'node_modules/@deepseek-ai/dsh/lib/bin.js'
 /** The built browser bundle the harness serves, inside the staged closure. */
 const STAGED_FRONTEND_INDEX = 'node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html'
 
+/** Where pnpm's legacy deploy leaves direct packages it hoists out of the target. */
+const DEPLOY_SOURCE_NODE_MODULES = 'apps/desktop/runtime/node_modules'
+
 /** Build outputs that must exist before staging, with the command that produces them. */
 const REQUIRED_BUILD_OUTPUTS = [
   'apps/cli/lib/bin.js',
@@ -46,16 +49,22 @@ function pnpmBin(): string {
   return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 }
 
+/** The workspace's own tsx runner, invoked without a package-manager wrapper. */
+function tsxBin(): string {
+  return join(root, 'node_modules', '.bin', process.platform === 'win32' ? 'tsx.cmd' : 'tsx')
+}
+
 /**
  * Run a command to completion, streaming its output.
  * @param command - the executable.
  * @param args - its arguments.
+ * @param env - environment additions layered over this process's own.
  * @throws when the command cannot start or exits non-zero.
  */
-async function run(command: string, args: readonly string[]): Promise<void> {
+async function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<void> {
   console.log(`stage-desktop-harness: ${command} ${args.join(' ')}`)
   const code = await new Promise<number | null>((resolveExit, rejectExit) => {
-    const child = spawn(command, [...args], { cwd: root, stdio: 'inherit' })
+    const child = spawn(command, [...args], { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } })
     child.once('error', rejectExit)
     child.once('close', resolveExit)
   })
@@ -118,6 +127,38 @@ async function materializeLinks(staging: string): Promise<void> {
 }
 
 /**
+ * Copy back the direct dependencies pnpm's legacy deploy hoists beside the
+ * deploy source instead of into the target.
+ *
+ * Each package is copied without its own `node_modules`: the closure is flat,
+ * and a nested tree would introduce a second copy of Cordis, whose services
+ * would then be invisible to plugins resolving the other instance.
+ * @param staging - the staged tree.
+ * @throws when a declared dependency is in neither location.
+ */
+async function restoreHoistedDependencies(staging: string): Promise<void> {
+  const manifest = JSON.parse(await readFile(join(staging, 'package.json'), 'utf8')) as {
+    dependencies?: Record<string, string>
+  }
+  const source = resolve(root, DEPLOY_SOURCE_NODE_MODULES)
+  for (const dependency of Object.keys(manifest.dependencies ?? {}).sort()) {
+    const destination = join(staging, 'node_modules', dependency)
+    if (existsSync(destination)) continue
+    const hoisted = join(source, dependency)
+    if (!existsSync(hoisted)) {
+      throw new Error(`stage-desktop-harness: deployed dependency ${dependency} is in neither ${destination} nor ${hoisted}`)
+    }
+    console.log(`stage-desktop-harness: restoring ${dependency}`)
+    const nested = join(hoisted, 'node_modules')
+    await cp(hoisted, destination, {
+      recursive: true,
+      dereference: true,
+      filter: path => path !== nested && !path.startsWith(nested + sep),
+    })
+  }
+}
+
+/**
  * Verify the staged tree carries what the desktop shell spawns and serves.
  * @param staging - the staged tree.
  * @throws when a required artifact is absent.
@@ -147,7 +188,11 @@ if (missing.length > 0) {
   )
 }
 
-await run(pnpmBin(), ['run', 'verify-runtime-closure', '--', '--manifest', 'apps/desktop/runtime/package.json'])
+// The local runner, not `pnpm run` (which forwards its own `--` separator into
+// the script and trips its positional-free parsing) and not `pnpm exec` (whose
+// dependency-status check wants to purge a modules directory that a previous
+// production deploy left looking stale, which cannot be confirmed without a TTY).
+await run(tsxBin(), ['scripts/verify-runtime-closure.ts', '--manifest', 'apps/desktop/runtime/package.json'])
 await rm(staging, { recursive: true, force: true })
 // The same deploy flags the single-file executable build uses: a hoisted, flat
 // closure with peers supplied by the manifest rather than auto-installed.
@@ -160,7 +205,15 @@ await run(pnpmBin(), [
   '--config.auto-install-peers=false',
   '--config.link-workspace-packages=true',
   staging,
-])
+// A deploy is a batch step with no one to answer a prompt; this is pnpm's own
+// documented switch for that, and it keeps the run reproducible besides.
+], { CI: 'true' })
+await restoreHoistedDependencies(staging)
 await materializeLinks(staging)
 await verifyStaging(staging)
+// The legacy deploy installs production-only dependencies into the deploy
+// source, which leaves the workspace member looking stale to every later pnpm
+// command. Removing it returns that package to the ordinary "not installed yet"
+// state, which the next install restores without asking anything.
+await rm(resolve(root, DEPLOY_SOURCE_NODE_MODULES), { recursive: true, force: true })
 console.log(`stage-desktop-harness: staged ${relative(root, staging)}`)
