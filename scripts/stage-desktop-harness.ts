@@ -243,6 +243,8 @@ try {
   // production-only dependencies there, which every later pnpm command would
   // otherwise read as a stale workspace member.
   await rm(resolve(root, DEPLOY_SOURCE_NODE_MODULES), { recursive: true, force: true })
-  await run(pnpmBin(), ['install', '--frozen-lockfile'])
+  // Same non-interactive switch as the deploy: the restore must not stop on a
+  // confirmation prompt in CI or in any other run without a terminal.
+  await run(pnpmBin(), ['install', '--frozen-lockfile'], { CI: 'true' })
 }
 console.log(`stage-desktop-harness: staged ${relative(root, staging)}`)

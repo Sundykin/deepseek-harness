@@ -37,6 +37,18 @@ pnpm --filter @deepseek-ai/dsh-desktop run start
 
 它让已构建的外壳对接同级的 `apps/cli` 启动器，无需暂存。设置 `DSH_DESKTOP_HARNESS_ENTRY` 可改为对接另一个 checkout 的启动器。
 
+## 诊断故障
+
+打包后的应用没有控制台，因此外壳会把 harness 及其子进程打印的一切写入日志文件，每次启动清空：
+
+| 平台 | 日志 |
+|---|---|
+| macOS | `~/Library/Logs/DeepSeek Harness/desktop.log` |
+| Windows | `%APPDATA%\DeepSeek Harness\logs\desktop.log` |
+| Linux | `~/.config/DeepSeek Harness/logs/desktop.log` |
+
+外壳报告的任何故障都会附上该路径。界面报告的故障——会话中途某个工具或选择器失败——其诊断信息同样写入这个文件，反馈问题时应以它为准：对话框能容纳的只是摘要，文件里才有调用栈。
+
 ## 限制
 
 应用与 `dsh` CLI 共用 `$DSH_HOME`，因此会话、设置与 agent preset 在两个界面上是同一份。再次启动会聚焦已运行的窗口，而不是启动第二个 harness：两个 harness 进程会在同一会话目录上提供两个端口。

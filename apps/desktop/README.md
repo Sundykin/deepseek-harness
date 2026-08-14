@@ -37,6 +37,18 @@ pnpm --filter @deepseek-ai/dsh-desktop run start
 
 This runs the built shell against the sibling `apps/cli` launcher, so no staging is needed. Set `DSH_DESKTOP_HARNESS_ENTRY` to run it against another checkout's launcher instead.
 
+## Diagnosing a failure
+
+A packaged app has no console, so the shell writes everything the harness and its own subprocesses print to a log file, truncated per launch:
+
+| Platform | Log |
+|---|---|
+| macOS | `~/Library/Logs/DeepSeek Harness/desktop.log` |
+| Windows | `%APPDATA%\DeepSeek Harness\logs\desktop.log` |
+| Linux | `~/.config/DeepSeek Harness/logs/desktop.log` |
+
+Any failure the shell reports names that path. A failure the interface reports — a tool or a picker failing mid-session — writes its diagnostics to the same file, which is where a bug report should come from: the message a dialog can hold is a summary, and the file has the stack.
+
 ## Limitations
 
 The app shares `$DSH_HOME` with the `dsh` CLI, so sessions, settings, and agent presets are the same on both surfaces. A second launch focuses the running window rather than starting a second harness, because two harness processes would serve two ports over the same session directory.

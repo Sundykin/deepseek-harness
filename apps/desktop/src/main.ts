@@ -15,6 +15,7 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
 import { startHarness, DESKTOP_PROFILE, type RunningHarness } from './harness.ts'
 import { harnessEnvironment, loginShellPath } from './environment.ts'
+import { harnessLogLine, openSessionLog, type SessionLog } from './log.ts'
 import { HARNESS_ENTRY_ENV, resolveHarnessEntry, resolveSplashDocument } from './paths.ts'
 
 /** Initial window size; the window is resizable and the UI is responsive below it. */
@@ -28,6 +29,9 @@ let harness: RunningHarness | undefined
 
 /** The single window, so `activate` reuses it instead of opening another. */
 let mainWindow: BrowserWindow | undefined
+
+/** This launch's log file, opened before the harness starts. */
+let sessionLog: SessionLog | undefined
 
 /**
  * Create the window and show the splash document while the harness binds.
@@ -70,11 +74,17 @@ function createWindow(): BrowserWindow {
 
 /**
  * Report a failure that leaves the app with nothing to show, then quit.
+ *
+ * The log path is part of the message: the text a dialog can hold is a summary,
+ * and the file is where the actual failure — including output from whatever the
+ * harness itself spawned — was written.
  * @param summary - the one-line failure description.
  * @param detail - launcher output or error text explaining it.
  */
 function failFatally(summary: string, detail: string): void {
-  dialog.showErrorBox(summary, detail)
+  sessionLog?.write(`${summary}\n${detail}`)
+  const logNote = sessionLog === undefined ? '' : `\n\nFull log: ${sessionLog.path}`
+  dialog.showErrorBox(summary, `${detail}${logNote}`)
   app.exit(1)
 }
 
@@ -83,6 +93,7 @@ function failFatally(summary: string, detail: string): void {
  * @returns nothing; a failed launch reports and quits.
  */
 async function launch(): Promise<void> {
+  sessionLog = openSessionLog(app.getPath('logs'))
   const entry = resolveHarnessEntry({
     packaged: app.isPackaged,
     resourcesPath: process.resourcesPath,
@@ -103,7 +114,10 @@ async function launch(): Promise<void> {
       // directory to start in, which a GUI launch does not otherwise have.
       cwd: app.getPath('home'),
       env: harnessEnvironment(process.env, shellPath),
-      onOutput: (line) => { console.log(line) },
+      onOutput: (line) => {
+        console.log(line)
+        sessionLog?.write(harnessLogLine(line, new Date().toISOString()))
+      },
     })
   } catch (error) {
     failFatally('DeepSeek Harness could not start', error instanceof Error ? error.message : String(error))
@@ -145,7 +159,9 @@ app.on('before-quit', (event) => {
   // bounded shutdown instead of letting Electron kill the process group.
   quitting = true
   event.preventDefault()
-  void harness.stop().then(() => { app.exit(0) })
+  void harness.stop()
+    .then(async () => { await sessionLog?.close() })
+    .then(() => { app.exit(0) })
 })
 
 void app.whenReady().then(launch)
