@@ -1,0 +1,25 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "description": "Desktop application entry: an Electron shell that starts the dsh harness on loopback HTTP and shows its browser UI in a window; distributed as one-click installers rather than on npm",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepseek-ai/deepseek-harness.git",
+    "directory": "apps/desktop"
+  },
+  "type": "module",
+  "main": "lib/main.js",
+  "license": "MIT",
+  "scripts": {
+    "postinstall": "install-electron",
+    "start": "electron .",
+    "stage": "tsx ../../scripts/stage-desktop-harness.ts",
+    "dist": "electron-builder --config electron-builder.yml",
+    "dist:dir": "electron-builder --config electron-builder.yml --dir"
+  },
+  "devDependencies": {
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3"
+  }
+}

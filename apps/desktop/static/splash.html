@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'" />
+    <title>DeepSeek Harness</title>
+    <style>
+      :root { color-scheme: light dark; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.25rem;
+        background: #1b1b1f;
+        color: #e6e6ea;
+        font: 400 0.95rem/1.5 system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+      .mark {
+        width: 2.5rem;
+        height: 2.5rem;
+        border: 2px solid #3d3d46;
+        border-top-color: #7f8cff;
+        border-radius: 50%;
+        animation: spin 900ms linear infinite;
+      }
+      .caption { color: #9a9aa6; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) { .mark { animation-duration: 3s; } }
+    </style>
+  </head>
+  <body>
+    <div class="mark"></div>
+    <p class="caption">Starting DeepSeek Harness…</p>
+  </body>
+</html>

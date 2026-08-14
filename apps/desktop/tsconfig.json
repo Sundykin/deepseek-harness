@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib/types",
+    // Electron ships its own types and augments the Node globals its main
+    // process runs against; the shell imports no workspace package, so this is
+    // the whole type surface it needs beyond Node.
+    "types": ["node", "electron"]
+  },
+  "include": [
+    "src"
+  ]
+}

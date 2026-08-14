@@ -1,0 +1,59 @@
+# Installer build for the desktop app. The app.asar carries only the bundled
+# Electron shell and its splash document; the harness is an unpacked resource
+# tree (staged by scripts/stage-desktop-harness.ts) because it loads native
+# addons and spawns processes, neither of which works from inside an archive.
+appId: ai.deepseek.harness.desktop
+productName: DeepSeek Harness
+copyright: Copyright © DeepSeek
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - lib/main.js
+  - static/**/*
+  - package.json
+
+extraResources:
+  - from: build/harness
+    to: harness
+
+asar: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # The shell relaunches its own binary as the harness runtime, so the child
+  # inherits this signature; the entitlement pair below is what Electron's
+  # runtime requires under the hardened runtime.
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+
+nsis:
+  # One-click install: no wizard pages, no install-location prompt, per-user so
+  # no elevation dialog stands between download and a running app.
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  category: Development
+  target:
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64, arm64]

@@ -38,3 +38,8 @@ apps/web/dist/
 worktrees/
 .agents/worktrees/
 .typert-*/
+
+# Harness deployment staged into the desktop installer (scripts/stage-desktop-harness.ts).
+apps/desktop/build/harness/
+# electron-builder output.
+apps/desktop/release/
