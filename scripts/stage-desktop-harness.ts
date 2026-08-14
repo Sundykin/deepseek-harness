@@ -55,6 +55,19 @@ function tsxBin(): string {
 }
 
 /**
+ * Windows batch wrappers (`pnpm.cmd`, `tsx.cmd`) are the only form these tools
+ * take there, and Node refuses to spawn a `.cmd` without a shell. Under a shell
+ * the command line is re-parsed, so anything containing whitespace or a shell
+ * metacharacter — a checkout path with a space, most often — has to be quoted.
+ */
+const SPAWN_THROUGH_SHELL = process.platform === 'win32'
+
+/** Quote one command-line word when a shell will re-parse it. */
+function shellArgument(value: string): string {
+  return SPAWN_THROUGH_SHELL && /[\s&|<>^()"]/.test(value) ? `"${value}"` : value
+}
+
+/**
  * Run a command to completion, streaming its output.
  * @param command - the executable.
  * @param args - its arguments.
@@ -64,7 +77,12 @@ function tsxBin(): string {
 async function run(command: string, args: readonly string[], env: NodeJS.ProcessEnv = {}): Promise<void> {
   console.log(`stage-desktop-harness: ${command} ${args.join(' ')}`)
   const code = await new Promise<number | null>((resolveExit, rejectExit) => {
-    const child = spawn(command, [...args], { cwd: root, stdio: 'inherit', env: { ...process.env, ...env } })
+    const child = spawn(shellArgument(command), args.map(shellArgument), {
+      cwd: root,
+      stdio: 'inherit',
+      env: { ...process.env, ...env },
+      shell: SPAWN_THROUGH_SHELL,
+    })
     child.once('error', rejectExit)
     child.once('close', resolveExit)
   })
@@ -194,26 +212,37 @@ if (missing.length > 0) {
 // production deploy left looking stale, which cannot be confirmed without a TTY).
 await run(tsxBin(), ['scripts/verify-runtime-closure.ts', '--manifest', 'apps/desktop/runtime/package.json'])
 await rm(staging, { recursive: true, force: true })
-// The same deploy flags the single-file executable build uses: a hoisted, flat
-// closure with peers supplied by the manifest rather than auto-installed.
-await run(pnpmBin(), [
-  '--filter', DEPLOY_ROOT_PACKAGE,
-  'deploy',
-  '--legacy',
-  '--prod',
-  '--config.node-linker=hoisted',
-  '--config.auto-install-peers=false',
-  '--config.link-workspace-packages=true',
-  staging,
-// A deploy is a batch step with no one to answer a prompt; this is pnpm's own
-// documented switch for that, and it keeps the run reproducible besides.
-], { CI: 'true' })
-await restoreHoistedDependencies(staging)
-await materializeLinks(staging)
-await verifyStaging(staging)
-// The legacy deploy installs production-only dependencies into the deploy
-// source, which leaves the workspace member looking stale to every later pnpm
-// command. Removing it returns that package to the ordinary "not installed yet"
-// state, which the next install restores without asking anything.
-await rm(resolve(root, DEPLOY_SOURCE_NODE_MODULES), { recursive: true, force: true })
+try {
+  // The same deploy flags the single-file executable build uses: a hoisted, flat
+  // closure with peers supplied by the manifest rather than auto-installed.
+  await run(pnpmBin(), [
+    '--filter', DEPLOY_ROOT_PACKAGE,
+    'deploy',
+    '--legacy',
+    '--prod',
+    '--config.node-linker=hoisted',
+    '--config.auto-install-peers=false',
+    '--config.link-workspace-packages=true',
+    staging,
+  // A deploy is a batch step with no one to answer a prompt; this is pnpm's own
+  // documented switch for that, and it keeps the run reproducible besides.
+  ], { CI: 'true' })
+  await restoreHoistedDependencies(staging)
+  await materializeLinks(staging)
+  await verifyStaging(staging)
+} finally {
+  // `pnpm deploy --prod` runs a production install rooted at this workspace,
+  // which prunes every devDependency from the checkout it was run in — the
+  // packager, the compilers, and the test runner among them. Restoring is not
+  // cleanup but part of the step: without it the next command in the same
+  // session, in CI or on a developer's machine, runs against a gutted
+  // workspace. It runs on failure too, so a broken staging run does not also
+  // leave the checkout unusable.
+  //
+  // The deploy source's own tree is removed first: the legacy deploy leaves
+  // production-only dependencies there, which every later pnpm command would
+  // otherwise read as a stale workspace member.
+  await rm(resolve(root, DEPLOY_SOURCE_NODE_MODULES), { recursive: true, force: true })
+  await run(pnpmBin(), ['install', '--frozen-lockfile'])
+}
 console.log(`stage-desktop-harness: staged ${relative(root, staging)}`)

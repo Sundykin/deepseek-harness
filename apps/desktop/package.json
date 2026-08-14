@@ -12,7 +12,7 @@
   "main": "lib/main.js",
   "license": "MIT",
   "scripts": {
-    "postinstall": "install-electron",
+    "postinstall": "node scripts/ensure-electron.mjs",
     "start": "electron .",
     "stage": "tsx ../../scripts/stage-desktop-harness.ts",
     "dist": "electron-builder --config electron-builder.yml",

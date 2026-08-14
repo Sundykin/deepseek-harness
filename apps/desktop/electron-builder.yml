@@ -29,6 +29,13 @@ extraResources:
 
 asar: true
 
+# This package has no production dependencies: the shell is bundled into
+# app.asar and the harness arrives as a staged resource tree whose native
+# addons were already built for their platform. Left on, the packager runs a
+# production install here to rebuild dependencies it would not find, which only
+# re-enters this package's own postinstall in a tree that has no node_modules.
+npmRebuild: false
+
 mac:
   category: public.app-category.developer-tools
   target:
