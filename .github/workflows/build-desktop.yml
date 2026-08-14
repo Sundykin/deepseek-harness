@@ -15,6 +15,16 @@ on:
         type: string
         required: false
         default: ''
+      version:
+        description: Version to release as; empty uses apps/desktop/package.json.
+        type: string
+        required: false
+        default: ''
+      publish:
+        description: Publish a GitHub Release with the built installers.
+        type: boolean
+        required: false
+        default: false
   workflow_dispatch:
     inputs:
       targets:
@@ -24,6 +34,17 @@ on:
         type: string
         required: false
         default: ''
+      version:
+        description: >-
+          Version to release as. Empty uses apps/desktop/package.json.
+        type: string
+        required: false
+        default: ''
+      publish:
+        description: Publish a GitHub Release with the built installers.
+        type: boolean
+        required: false
+        default: true
   pull_request:
     types: [labeled]
 
@@ -54,7 +75,25 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.version.outputs.version }}
     steps:
+      - uses: actions/checkout@v6
+
+      # The app's own manifest is the default source of the released version,
+      # so a release cannot silently disagree with what it packages.
+      - id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${REQUESTED:-}"
+          if [ -z "$version" ]; then
+            version="$(node -p "require('./apps/desktop/package.json').version")"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "releasing version $version"
+
       - id: plan
         env:
           TARGETS: ${{ inputs.targets }}
@@ -153,3 +192,78 @@ jobs:
           path: dist-desktop/*
           if-no-files-found: error
           retention-days: 7
+
+  # One release carrying every target's installer. It runs only when asked, and
+  # only after every build succeeded: a release missing a platform is worse than
+  # no release, because the missing one looks unsupported rather than unbuilt.
+  release:
+    needs: [plan, build]
+    if: ${{ inputs.publish && github.event_name != 'pull_request' }}
+    name: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dsh-desktop-*
+          path: installers
+          merge-multiple: true
+
+      - name: List installers
+        shell: bash
+        run: ls -lh installers
+
+      # The changelog section for this version is the release body, so what a
+      # downloader reads is reviewed in the repository rather than written at
+      # release time. A version with no section falls back to generated notes.
+      - id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          changelog=apps/desktop/CHANGELOG.md
+          if awk -v v="## $VERSION" '$0 == v {found=1; next} found && /^## /{exit} found' "$changelog" > release-notes.md \
+            && [ -s release-notes.md ]; then
+            echo "has_notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no $changelog section for $VERSION; falling back to generated notes"
+            echo "has_notes=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # A prerelease version must not present itself as a stable download.
+      - id: channel
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$VERSION" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: desktop-v${{ needs.plan.outputs.version }}
+          HAS_NOTES: ${{ steps.notes.outputs.has_notes }}
+          PRERELEASE: ${{ steps.channel.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--title "DeepSeek Harness Desktop $VERSION")
+          [ "$PRERELEASE" = 'true' ] && args+=(--prerelease)
+          if [ "$HAS_NOTES" = 'true' ]; then args+=(--notes-file release-notes.md); else args+=(--generate-notes); fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # Re-running a build for the same version replaces its installers
+            # rather than failing, so a fixed build can be republished.
+            gh release upload "$TAG" installers/* --clobber
+            gh release edit "$TAG" "${args[@]}"
+          else
+            gh release create "$TAG" installers/* --target "$GITHUB_SHA" "${args[@]}"
+          fi
+          gh release view "$TAG" --json tagName,isPrerelease,assets \
+            -q '"published \(.tagName) (prerelease: \(.isPrerelease)) with \(.assets | length) asset(s)"'
